@@ -4,22 +4,19 @@ from fastapi import (
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from . import crud, models, schemas, auth, cloudinary_utils
-from .database import SessionLocal, engine
+from .database import get_db, engine
 from datetime import timedelta
-from .main import limiter
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+limiter = Limiter(key_func=get_remote_address)
 
 models.Base.metadata.create_all(bind=engine)
 
 router = APIRouter()
 
 
-# Dependency
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+# Database dependency imported from database module
 
 
 @router.post("/signup", response_model=schemas.User,
@@ -80,6 +77,58 @@ def login(db: Session = Depends(get_db),
     return {"access_token": access_token, "token_type": "bearer"}
 
 
+@router.post("/password-reset/request")
+def request_password_reset(
+    request: schemas.PasswordResetRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Request password reset token.
+    
+    Args:
+        request: Password reset request with email
+        db: Database session
+        
+    Returns:
+        Success message
+    """
+    try:
+        token = crud.create_password_reset_token(db, request.email)
+        # In a real app, you would send an email with the reset link
+        print(f"Password reset token for {request.email}: {token}")
+        return {"message": "If email exists, password reset link has been sent"}
+    except ValueError:
+        # Don't reveal if user exists or not for security
+        return {"message": "If email exists, password reset link has been sent"}
+
+
+@router.post("/password-reset/confirm")
+def confirm_password_reset(
+    request: schemas.PasswordResetConfirm,
+    db: Session = Depends(get_db)
+):
+    """
+    Confirm password reset with token and new password.
+    
+    Args:
+        request: Password reset confirmation with token and new password
+        db: Database session
+        
+    Returns:
+        Success message
+        
+    Raises:
+        HTTPException: If token is invalid or expired
+    """
+    success = crud.reset_password(db, request.token, request.new_password)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token"
+        )
+    return {"message": "Password reset successfully"}
+
+
 @router.get("/users/me/", response_model=schemas.User)
 @limiter.limit("10/minute")
 async def read_users_me(request: Request,
@@ -91,12 +140,26 @@ async def read_users_me(request: Request,
 @router.patch("/users/avatar", response_model=schemas.User)
 async def update_avatar_user(
     file: UploadFile = File(),
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.require_admin),
     db: Session = Depends(get_db),
 ):
+    """
+    Update user avatar. Only available for admin users.
+    
+    Args:
+        file: Avatar image file
+        current_user: Current authenticated admin user
+        db: Database session
+        
+    Returns:
+        Updated user information
+    """
     url = cloudinary_utils.upload_avatar(
         file.file, f"avatars/{current_user.id}")
     user = crud.update_avatar(db, current_user, url)
+    # Invalidate user cache after avatar update
+    from .redis_client import redis_client
+    redis_client.invalidate_user_cache(current_user.id)
     return user
 
 

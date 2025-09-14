@@ -8,12 +8,21 @@ fastapi = "*"
 uvicorn = "*"
 sqlalchemy = "*"
 psycopg2-binary = "*"
-pydantic = "*"
+pydantic = {extras = ["email"], version = "*"}
 python-dotenv = "*"
 cloudinary = "*"
 slowapi = "*"
 passlib = {extras = ["bcrypt"], version = "*"}
 python-jose = {extras = ["cryptography"], version = "*"}
+python-multipart = "*"
+redis = "*"
+pytest = "*"
+pytest-asyncio = "*"
+pytest-cov = "*"
+httpx = "*"
+sphinx = "*"
+sphinx-rtd-theme = "*"
+fakeredis = "*"
 
 [dev-packages]
 
